@@ -182,7 +182,7 @@ let s:delimiterMap = {
     \ 'groovy': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
     \ 'gsp': { 'left': '<%--', 'right': '--%>', 'leftAlt': '<!--','rightAlt': '-->'},
     \ 'gtkrc': { 'left': '#' },
-    \ 'haskell': { 'left': '{-','right': '-}', 'leftAlt': '--' },
+    \ 'haskell': { 'left': '{-','right': '-}', 'nested': 1, 'leftAlt': '--', 'nestedAlt': 1 },
     \ 'hb': { 'left': '#' },
     \ 'h': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
     \ 'haml': { 'left': '-#', 'leftAlt': '/' },
@@ -221,7 +221,7 @@ let s:delimiterMap = {
     \ 'lilo': { 'left': '#' },
     \ 'lilypond': { 'left': '%' },
     \ 'liquid': { 'left': '{% comment %}', 'right': '{% endcomment %}' },
-    \ 'lisp': { 'left': ';', 'leftAlt': '#|', 'rightAlt': '|#' },
+    \ 'lisp': { 'left': ';', 'nested': 1, 'leftAlt': '#|', 'rightAlt': '|#', 'nestedAlt': 1 },
     \ 'llvm': { 'left': ';' },
     \ 'lotos': { 'left': '(*', 'right': '*)' },
     \ 'lout': { 'left': '#' },
@@ -267,7 +267,7 @@ let s:delimiterMap = {
     \ 'objc': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
     \ 'objcpp': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
     \ 'objj': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
-    \ 'ocaml': { 'left': '(*', 'right': '*)' },
+    \ 'ocaml': { 'left': '(*', 'right': '*)', 'nested': 1 },
     \ 'occam': { 'left': '--' },
     \ 'octave': { 'left': '%', 'leftAlt': '#' },
     \ 'omlet': { 'left': '(*', 'right': '*)' },
@@ -321,9 +321,9 @@ let s:delimiterMap = {
     \ 'samba': { 'left': ';', 'leftAlt': '#' },
     \ 'sass': { 'left': '//', 'leftAlt': '/*' },
     \ 'sather': { 'left': '--' },
-    \ 'scala': { 'left': '//', 'leftAlt': '/*', 'rightAlt': '*/' },
+    \ 'scala': { 'left': '//', 'nested': 1, 'leftAlt': '/*', 'rightAlt': '*/', 'nestedAlt': 1 },
     \ 'scons': { 'left': '#' },
-    \ 'scheme': { 'left': ';', 'leftAlt': '#|', 'rightAlt': '|#' },
+    \ 'scheme': { 'left': ';', 'nested': 1, 'leftAlt': '#|', 'rightAlt': '|#', 'nestedAlt': 1 },
     \ 'scilab': { 'left': '//' },
     \ 'scsh': { 'left': ';' },
     \ 'scss': { 'left': '/*', 'right': '*/', 'leftAlt': '//' },
@@ -343,7 +343,7 @@ let s:delimiterMap = {
     \ 'smarty': { 'left': '{*', 'right': '*}' },
     \ 'smil': { 'left': '<!', 'right': '>' },
     \ 'smith': { 'left': ';' },
-    \ 'sml': { 'left': '(*', 'right': '*)' },
+    \ 'sml': { 'left': '(*', 'right': '*)', 'nested': 1 },
     \ 'snnsnet': { 'left': '#' },
     \ 'snnspat': { 'left': '#' },
     \ 'snnsres': { 'left': '#' },
@@ -460,6 +460,11 @@ function s:SetUpForNewFiletype(filetype, forceReset)
                 let b:NERDCommenterDelims[i] = ''
             endif
         endfor
+        for i in ['nested', 'nestedAlt']
+            if !has_key(b:NERDCommenterDelims, i)
+                let b:NERDCommenterDelims[i] = 0
+            endif
+        endfor
     else
         let b:NERDCommenterDelims = s:CreateDelimMapFromCms()
     endif
@@ -496,14 +501,18 @@ function s:SwitchToAlternativeDelimiters(printMsgs)
     "save the current delimiters
     let tempLeft = s:Left()
     let tempRight = s:Right()
+    let tempNested = s:Nested()
 
     "swap current delimiters for alternative
     let b:NERDCommenterDelims['left'] = b:NERDCommenterDelims['leftAlt']
     let b:NERDCommenterDelims['right'] = b:NERDCommenterDelims['rightAlt']
+    "set information on whether these are nested
+    let b:NERDCommenterDelims['nested'] = b:NERDCommenterDelims['nestedAlt']
 
     "set the previously current delimiters to be the new alternative ones
     let b:NERDCommenterDelims['leftAlt'] = tempLeft
     let b:NERDCommenterDelims['rightAlt'] = tempRight
+    let b:NERDCommenterDelims['nestedAlt'] = tempNested
 
     "tell the user what comment delimiters they are now using
     if a:printMsgs
@@ -701,7 +710,7 @@ function s:CommentLines(forceNested, align, firstLine, lastLine)
         if s:CanCommentLine(a:forceNested, currentLine)
             "if the user has specified forceNesting then we check to see if we
             "need to switch delimiters for place-holders
-            if a:forceNested && g:NERDUsePlaceHolders
+            if a:forceNested && g:NERDUsePlaceHolders && !s:Nested()
                 let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
             endif
 
@@ -747,9 +756,11 @@ function s:CommentLinesMinimal(firstLine, lastLine)
         throw 'NERDCommenter.Delimiters exception: Minimal comments can only be used for filetypes that have multipart delimiters'
     endif
 
+    let sexyNested = s:SexyNested()
+
     "if we need to use place holders for the comment, make sure they are
-    "enabled for this filetype
-    if !g:NERDUsePlaceHolders && s:DoesBlockHaveMultipartDelim(a:firstLine, a:lastLine)
+    "enabled for this filetype, or the delims allow nesting
+    if !g:NERDUsePlaceHolders && !sexyNested && s:DoesBlockHaveMultipartDelim(a:firstLine, a:lastLine)
         throw 'NERDCommenter.Settings exception: Place holders are required but disabled.'
     endif
 
@@ -759,13 +770,15 @@ function s:CommentLinesMinimal(firstLine, lastLine)
 
     "make sure all multipart delims on the lines are replaced with
     "placeholders to prevent illegal syntax
-    let currentLine = a:firstLine
-    while(currentLine <= a:lastLine)
-        let theLine = getline(currentLine)
-        let theLine = s:ReplaceDelims(left, right, g:NERDLPlace, g:NERDRPlace, theLine)
-        call setline(currentLine, theLine)
-        let currentLine = currentLine + 1
-    endwhile
+    if !sexyNested
+        let currentLine = a:firstLine
+        while(currentLine <= a:lastLine)
+            let theLine = getline(currentLine)
+            let theLine = s:ReplaceDelims(left, right, g:NERDLPlace, g:NERDRPlace, theLine)
+            call setline(currentLine, theLine)
+            let currentLine = currentLine + 1
+        endwhile
+    endif
 
     "add the delim to the top line
     let theLine = getline(a:firstLine)
@@ -805,7 +818,7 @@ function s:CommentLinesSexy(topline, bottomline)
         throw 'NERDCommenter.Delimiters exception: cannot perform sexy comments with available delimiters.'
     endif
 
-    "make sure the lines arent already commented sexually
+    "make sure the lines arent already commented sexually or we can nest
     if !s:CanSexyCommentLines(a:topline, a:bottomline)
         throw 'NERDCommenter.Nesting exception: cannot nest sexy comments'
     endif
@@ -830,7 +843,9 @@ function s:CommentLinesSexy(topline, bottomline)
         if lineHasTabs
             let theLine = s:ConvertLeadingTabsToSpaces(theLine)
         endif
-        let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+        if !s:SexyNested()
+            let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+        endif
         let theLine = s:AddLeftDelimAligned(left . spaceString, theLine, leftAlignIndx)
         if lineHasTabs
             let theLine = s:ConvertLeadingSpacesToTabs(theLine)
@@ -844,7 +859,9 @@ function s:CommentLinesSexy(topline, bottomline)
             if lineHasTabs
                 let theLine = s:ConvertLeadingTabsToSpaces(theLine)
             endif
-            let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+            if !s:SexyNested()
+                let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+            endif
         endif
         let theLine = s:AddRightDelim(spaceString . right, theLine)
         if lineHasTabs
@@ -889,7 +906,9 @@ function s:CommentLinesSexy(topline, bottomline)
             let theLine = s:ConvertLeadingTabsToSpaces(theLine)
         endif
 
-        let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+        if !s:SexyNested()
+            let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
+        endif
 
         " add the sexyComMarker
         let theLine = repeat(' ', leftAlignIndx) . repeat(' ', strlen(left)-strlen(sexyComMarker)) . sexyComMarkerSpaced . strpart(theLine, leftAlignIndx)
@@ -923,9 +942,9 @@ function s:CommentLinesToggle(forceNested, firstLine, lastLine)
         let theLine = s:ConvertLeadingTabsToSpaces(theLine)
         if s:CanToggleCommentLine(a:forceNested, currentLine)
 
-            "if the user has specified forceNesting then we check to see if we
-            "need to switch delimiters for place-holders
-            if g:NERDUsePlaceHolders
+            " if the user has specified forceNesting then we check to see if we
+            " need to switch delimiters for place-holders
+            if g:NERDUsePlaceHolders && !s:Nested()
                 let theLine = s:SwapOutterMultiPartDelimsForPlaceHolders(theLine)
             endif
 
@@ -1558,6 +1577,12 @@ function s:AltMultipart()
     return b:NERDCommenterDelims['rightAlt'] != ''
 endfunction
 
+" Function: s:AltNested() {{{2
+" returns 1 if the alternate multipart (if any) delims allow nesting
+function s:AltNested()
+    return b:NERDCommenterDelims['nestedAlt']
+endfunction
+
 " Function: s:CanCommentLine(forceNested, line) {{{2
 "This function is used to determine whether the given line can be commented.
 "It returns 1 if it can be and 0 otherwise
@@ -1587,7 +1612,7 @@ function s:CanCommentLine(forceNested, lineNum)
     endif
 
     "if the line is commented but nesting is allowed then return true
-    if a:forceNested && (!s:Multipart() || g:NERDUsePlaceHolders)
+    if s:Nested() || (a:forceNested && (!s:Multipart() || g:NERDUsePlaceHolders))
         return 1
     endif
 
@@ -1609,6 +1634,11 @@ endfunction
 " Return: 1 if the given lines can be commented sexually, 0 otherwise
 function s:CanSexyCommentLines(topline, bottomline)
     " see if the selected regions have any sexy comments
+    " however, if the language allows nested comments,
+    " we allow nested sexy comments
+    if s:SexyNested()
+        return 1
+    endif
     let currentLine = a:topline
     while(currentLine <= a:bottomline)
         if s:IsInSexyComment(currentLine)
@@ -1940,6 +1970,29 @@ function s:GetSexyComMarker(space, esc)
     endif
 
     return sexyComMarker
+endfunction
+
+" Function: s:SexyNested() {{{2
+" Returns 1 if the sexy delimeters allow nesting
+" TODO this is ugly copy&paste from the GetSexyComLeft/Right functions,
+" these could all be cleaned up
+function s:SexyNested()
+    let lenLeft = strlen(s:Left())
+    let lenLeftAlt = strlen(s:Left({'alt': 1}))
+
+    "assume c style sexy comments if possible
+    if s:HasCStyleComments()
+        return (s:Left() == '/*' && s:Nested()) || (s:Left({'alt': 1}) == '/*' && s:AltNested())
+    else
+        "grab the longest left delim that has a right
+        if s:Multipart() && lenLeft >= lenLeftAlt
+            return s:Nested()
+        elseif s:AltMultipart()
+            return s:AltNested()
+        else
+            return 0
+        endif
+    endif
 endfunction
 
 " Function: s:GetSexyComLeft(space, esc) {{{2
@@ -2457,6 +2510,12 @@ function s:NerdEcho(msg, typeOfMsg)
     elseif a:typeOfMsg == 1
         echom 'NERDCommenter:' . a:msg
     endif
+endfunction
+
+" Function: s:Nested() {{{2
+" returns 1 if the current multipart (if any) delims allow nesting
+function s:Nested()
+    return b:NERDCommenterDelims['nested']
 endfunction
 
 " Function: s:NumberOfLeadingTabs(s) {{{2
